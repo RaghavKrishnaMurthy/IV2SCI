@@ -1,0 +1,907 @@
+$integration: 'http://ibm.com/appconnect/integration/v2/integrationFile'
+integration:
+  type: trigger-action
+  trigger-interfaces:
+    trigger-interface-1:
+      connector-type: streaming-connector-scheduler
+      type: event-trigger
+      triggers:
+        SCHEDULE:
+          input-context:
+            data: scheduler
+          assembly:
+            $ref: '#/integration/assemblies/assembly-1'
+          options:
+            subscription:
+              scheduleConfiguration:
+                interval:
+                  unit: minute
+                  value: 1
+                  runOnceOncheck: false
+                  days:
+                    - MON
+                    - TUE
+                    - WED
+                    - THU
+                    - FRI
+                    - SAT
+                    - SUN
+                  timeZone: UTC
+      account-name: Account 2
+  action-interfaces:
+    action-interface-1:
+      type: api-action
+      business-object: request
+      connector-type: http
+      account-name: Account 2
+      actions:
+        INVOKE: {}
+    action-interface-2:
+      type: api-action
+      business-object: document
+      connector-type: cloudantdb
+      account-name: Account 7
+      actions:
+        RETRIEVEALL: {}
+    action-interface-3:
+      type: api-action
+      business-object: request
+      connector-type: http
+      account-name: Account 2
+      actions:
+        INVOKE: {}
+    action-interface-4:
+      type: api-action
+      business-object: request
+      connector-type: http
+      account-name: Account 2
+      actions:
+        INVOKE: {}
+    action-interface-5:
+      type: api-action
+      business-object: request
+      connector-type: http
+      account-name: Account 2
+      actions:
+        INVOKE: {}
+  assemblies:
+    assembly-1:
+      assembly:
+        execute:
+          - custom-action:
+              name: HTTP Invoke method
+              target:
+                $ref: '#/integration/action-interfaces/action-interface-1'
+              action: INVOKE
+              map:
+                customSchemas:
+                  properties.`requestHeaders`:
+                    type: object
+                    properties:
+                      Content-Type:
+                        type: string
+                      Authorization:
+                        type: string
+                mappings:
+                  - continue2xx:
+                      expression: 'true'
+                  - method:
+                      template: POST
+                  - requestBody:
+                      template: grant_type=client_credentials
+                  - requestHeaders:
+                      mappings:
+                        - Authorization:
+                            template: >-
+                              Basic
+                              MEVnOE5zZk1ONURtMFFISkx0d3d5WW9Uc0k3SmNhbFU6enpGSVZIaFNpbTZIWGNDN29URWQwUjRFYVFZTkRDUWM
+                        - Content-Type:
+                            template: application/x-www-form-urlencoded
+                  - url:
+                      template: >-
+                        https://api.watsoncommerce.ibm.com/inventory/3bd58a7a/v1/oauth2/token
+                $map: 'http://ibm.com/appconnect/map/v1'
+                input:
+                  - variable: Trigger
+                    $ref: '#/trigger/payload'
+          - parse:
+              name: JSON Parser Parse
+              parse-format: json
+              source:
+                template: '{{$HTTPInvokemethod.responseBody}}'
+                input:
+                  - variable: Trigger
+                    $ref: '#/trigger/payload'
+                  - variable: HTTPInvokemethod
+                    $ref: '#/node-output/HTTP Invoke method/response/payload'
+                  - variable: HTTPInvokemethodMetadata
+                    $ref: '#/node-output/HTTP Invoke method/response'
+              sample-data: |-
+                {
+                    "token_type": "bearer",
+                    "access_token": "1rfSzQWWg1nbFYtG8OrqiDY8SQqoZN6Z",
+                    "expires_in": 43200
+                }
+              output-schema:
+                $schema: 'http://json-schema.org/draft-04/schema#'
+                type: object
+                properties:
+                  token_type:
+                    type: string
+                  access_token:
+                    type: string
+                  expires_in:
+                    type: number
+                title: Parsed JSON
+          - logging:
+              name: Log 4
+              map:
+                $map: 'http://ibm.com/appconnect/map/v1'
+                input:
+                  - variable: Trigger
+                    $ref: '#/trigger/payload'
+                  - variable: HTTPInvokemethod
+                    $ref: '#/node-output/HTTP Invoke method/response/payload'
+                  - variable: HTTPInvokemethodMetadata
+                    $ref: '#/node-output/HTTP Invoke method/response'
+                  - variable: JSONParserParse
+                    $ref: '#/node-output/JSON Parser Parse/response/payload'
+                mappings:
+                  - logLevel:
+                      template: Info
+                  - logMessage:
+                      template: '{{$JSONParserParse.access_token}}'
+          - retrieve-action:
+              name: IBM Cloudant Retrieve documents
+              target:
+                $ref: '#/integration/action-interfaces/action-interface-2'
+              filter:
+                where:
+                  db_name: itemidshpnode
+                input:
+                  - variable: Trigger
+                    $ref: '#/trigger/payload'
+                  - variable: HTTPInvokemethod
+                    $ref: '#/node-output/HTTP Invoke method/response/payload'
+                  - variable: HTTPInvokemethodMetadata
+                    $ref: '#/node-output/HTTP Invoke method/response'
+                  - variable: JSONParserParse
+                    $ref: '#/node-output/JSON Parser Parse/response/payload'
+                limit: 10
+              allow-truncation: false
+              pagination-type: SKIP_LIMIT
+              allow-empty-output: false
+          - for-each:
+              name: For each
+              assembly:
+                $ref: '#/integration/assemblies/assembly-2'
+              source:
+                expression: '$IBMCloudantRetrievedocuments '
+                input:
+                  - variable: Trigger
+                    $ref: '#/trigger/payload'
+                  - variable: HTTPInvokemethod
+                    $ref: '#/node-output/HTTP Invoke method/response/payload'
+                  - variable: HTTPInvokemethodMetadata
+                    $ref: '#/node-output/HTTP Invoke method/response'
+                  - variable: JSONParserParse
+                    $ref: '#/node-output/JSON Parser Parse/response/payload'
+                  - variable: IBMCloudantRetrievedocuments
+                    $ref: >-
+                      #/node-output/IBM Cloudant Retrieve
+                      documents/response/payload
+                  - variable: IBMCloudantRetrievedocumentsMetadata
+                    $ref: '#/node-output/IBM Cloudant Retrieve documents/response'
+              mode: sequential
+              continue-on-error: true
+              map:
+                $map: 'http://ibm.com/appconnect/map/v1'
+                input:
+                  - variable: Foreachitem
+                    $ref: '#/block/For each/current-item'
+                  - variable: Trigger
+                    $ref: '#/trigger/payload'
+                  - variable: JSONParserParse3
+                    $ref: >-
+                      #/block/For each/node-output/JSON Parser Parse
+                      3/response/payload
+                  - variable: HTTPInvokemethod2
+                    $ref: >-
+                      #/block/For each/node-output/HTTP Invoke method
+                      2/response/payload
+                  - variable: HTTPInvokemethod2Metadata
+                    $ref: '#/block/For each/node-output/HTTP Invoke method 2/response'
+                  - variable: JSONParserParse2
+                    $ref: >-
+                      #/block/For each/node-output/JSON Parser Parse
+                      2/response/payload
+                  - variable: HTTPInvokemethod3
+                    $ref: >-
+                      #/block/For each/node-output/HTTP Invoke method
+                      3/response/payload
+                  - variable: HTTPInvokemethod3Metadata
+                    $ref: '#/block/For each/node-output/HTTP Invoke method 3/response'
+                  - variable: HTTPInvokemethod4
+                    $ref: >-
+                      #/block/For each/node-output/HTTP Invoke method
+                      4/response/payload
+                  - variable: HTTPInvokemethod4Metadata
+                    $ref: '#/block/For each/node-output/HTTP Invoke method 4/response'
+                  - variable: HTTPInvokemethod
+                    $ref: '#/node-output/HTTP Invoke method/response/payload'
+                  - variable: HTTPInvokemethodMetadata
+                    $ref: '#/node-output/HTTP Invoke method/response'
+                  - variable: JSONParserParse
+                    $ref: '#/node-output/JSON Parser Parse/response/payload'
+                  - variable: IBMCloudantRetrievedocuments
+                    $ref: >-
+                      #/node-output/IBM Cloudant Retrieve
+                      documents/response/payload
+                  - variable: IBMCloudantRetrievedocumentsMetadata
+                    $ref: '#/node-output/IBM Cloudant Retrieve documents/response'
+                mappings: []
+              display-name: Documentid
+    assembly-2:
+      assembly:
+        execute:
+          - parse:
+              name: JSON Parser Parse 3
+              parse-format: json
+              source:
+                template: '{{$Foreachitem.data}}'
+                input:
+                  - variable: Foreachitem
+                    $ref: '#/block/For each/current-item'
+                  - variable: Trigger
+                    $ref: '#/trigger/payload'
+                  - variable: HTTPInvokemethod
+                    $ref: '#/node-output/HTTP Invoke method/response/payload'
+                  - variable: HTTPInvokemethodMetadata
+                    $ref: '#/node-output/HTTP Invoke method/response'
+                  - variable: JSONParserParse
+                    $ref: '#/node-output/JSON Parser Parse/response/payload'
+                  - variable: IBMCloudantRetrievedocuments
+                    $ref: >-
+                      #/node-output/IBM Cloudant Retrieve
+                      documents/response/payload
+                  - variable: IBMCloudantRetrievedocumentsMetadata
+                    $ref: '#/node-output/IBM Cloudant Retrieve documents/response'
+              sample-data: |-
+                {
+                  "_id": "1307b3ad944f7d4aca948a9089a44d37",
+                  "_rev": "5-899f9f22215dbb026f81ccc089eab5d9",
+                  "Itemid": "SKU1025",
+                  "shipNodes": "ADSTORE3"
+                 }
+              output-schema:
+                $schema: 'http://json-schema.org/draft-04/schema#'
+                type: object
+                properties:
+                  _id:
+                    type: string
+                  _rev:
+                    type: string
+                  Itemid:
+                    type: string
+                  shipNodes:
+                    type: string
+                title: Parsed JSON
+          - logging:
+              name: Log 5
+              map:
+                $map: 'http://ibm.com/appconnect/map/v1'
+                input:
+                  - variable: Foreachitem
+                    $ref: '#/block/For each/current-item'
+                  - variable: Trigger
+                    $ref: '#/trigger/payload'
+                  - variable: JSONParserParse3
+                    $ref: >-
+                      #/block/For each/node-output/JSON Parser Parse
+                      3/response/payload
+                  - variable: HTTPInvokemethod
+                    $ref: '#/node-output/HTTP Invoke method/response/payload'
+                  - variable: HTTPInvokemethodMetadata
+                    $ref: '#/node-output/HTTP Invoke method/response'
+                  - variable: JSONParserParse
+                    $ref: '#/node-output/JSON Parser Parse/response/payload'
+                  - variable: IBMCloudantRetrievedocuments
+                    $ref: >-
+                      #/node-output/IBM Cloudant Retrieve
+                      documents/response/payload
+                  - variable: IBMCloudantRetrievedocumentsMetadata
+                    $ref: '#/node-output/IBM Cloudant Retrieve documents/response'
+                mappings:
+                  - logLevel:
+                      template: Info
+                  - logMessage:
+                      template: >-
+                        {{$JSONParserParse3.Itemid}}{{$JSONParserParse3.shipNodes}}
+          - custom-action:
+              name: HTTP Invoke method 2
+              target:
+                $ref: '#/integration/action-interfaces/action-interface-3'
+              action: INVOKE
+              map:
+                customSchemas:
+                  properties.`requestHeaders`:
+                    type: object
+                    properties:
+                      Authorization:
+                        type: string
+                      Content-Type:
+                        type: string
+                mappings:
+                  - continue2xx:
+                      expression: 'true'
+                  - method:
+                      template: POST
+                  - requestBody:
+                      template: >-
+                        { "lines": [{ "deliveryMethod": "SHP", "itemId":
+                        "{{$JSONParserParse3.Itemid}}", "lineId": "1",
+                        "productClass": "NEW", "shipNodes":
+                        ["{{$JSONParserParse3.shipNodes}}"], "unitOfMeasure":
+                        "EACH" }], "segment": "ONLINE", "segmentType": "Channel"
+                        }
+                  - requestHeaders:
+                      mappings:
+                        - Authorization:
+                            template: 'bearer {{$JSONParserParse.access_token}}'
+                        - Content-Type:
+                            template: application/json
+                  - url:
+                      template: >-
+                        https://api.watsoncommerce.ibm.com/inventory/3bd58a7a/v1/availability/node
+                $map: 'http://ibm.com/appconnect/map/v1'
+                input:
+                  - variable: Foreachitem
+                    $ref: '#/block/For each/current-item'
+                  - variable: Trigger
+                    $ref: '#/trigger/payload'
+                  - variable: JSONParserParse3
+                    $ref: >-
+                      #/block/For each/node-output/JSON Parser Parse
+                      3/response/payload
+                  - variable: HTTPInvokemethod
+                    $ref: '#/node-output/HTTP Invoke method/response/payload'
+                  - variable: HTTPInvokemethodMetadata
+                    $ref: '#/node-output/HTTP Invoke method/response'
+                  - variable: JSONParserParse
+                    $ref: '#/node-output/JSON Parser Parse/response/payload'
+                  - variable: IBMCloudantRetrievedocuments
+                    $ref: >-
+                      #/node-output/IBM Cloudant Retrieve
+                      documents/response/payload
+                  - variable: IBMCloudantRetrievedocumentsMetadata
+                    $ref: '#/node-output/IBM Cloudant Retrieve documents/response'
+          - logging:
+              name: Log
+              map:
+                $map: 'http://ibm.com/appconnect/map/v1'
+                input:
+                  - variable: Foreachitem
+                    $ref: '#/block/For each/current-item'
+                  - variable: Trigger
+                    $ref: '#/trigger/payload'
+                  - variable: JSONParserParse3
+                    $ref: >-
+                      #/block/For each/node-output/JSON Parser Parse
+                      3/response/payload
+                  - variable: HTTPInvokemethod2
+                    $ref: >-
+                      #/block/For each/node-output/HTTP Invoke method
+                      2/response/payload
+                  - variable: HTTPInvokemethod2Metadata
+                    $ref: '#/block/For each/node-output/HTTP Invoke method 2/response'
+                  - variable: HTTPInvokemethod
+                    $ref: '#/node-output/HTTP Invoke method/response/payload'
+                  - variable: HTTPInvokemethodMetadata
+                    $ref: '#/node-output/HTTP Invoke method/response'
+                  - variable: JSONParserParse
+                    $ref: '#/node-output/JSON Parser Parse/response/payload'
+                  - variable: IBMCloudantRetrievedocuments
+                    $ref: >-
+                      #/node-output/IBM Cloudant Retrieve
+                      documents/response/payload
+                  - variable: IBMCloudantRetrievedocumentsMetadata
+                    $ref: '#/node-output/IBM Cloudant Retrieve documents/response'
+                mappings:
+                  - logLevel:
+                      template: Error
+                  - logMessage:
+                      template: >-
+                        { "lines": [{ "deliveryMethod": "SHP", "itemId":
+                        "{{$JSONParserParse3.Itemid}}", "lineId": "1",
+                        "productClass": "NEW", "shipNodes":
+                        ["{{$JSONParserParse3.shipNodes}}"], "unitOfMeasure":
+                        "EACH" }], "segment": "ONLINE", "segmentType": "Channel"
+                        }
+          - parse:
+              name: JSON Parser Parse 2
+              parse-format: json
+              source:
+                template: '{{$HTTPInvokemethod2.responseBody}}'
+                input:
+                  - variable: Foreachitem
+                    $ref: '#/block/For each/current-item'
+                  - variable: Trigger
+                    $ref: '#/trigger/payload'
+                  - variable: JSONParserParse3
+                    $ref: >-
+                      #/block/For each/node-output/JSON Parser Parse
+                      3/response/payload
+                  - variable: HTTPInvokemethod2
+                    $ref: >-
+                      #/block/For each/node-output/HTTP Invoke method
+                      2/response/payload
+                  - variable: HTTPInvokemethod2Metadata
+                    $ref: '#/block/For each/node-output/HTTP Invoke method 2/response'
+                  - variable: HTTPInvokemethod
+                    $ref: '#/node-output/HTTP Invoke method/response/payload'
+                  - variable: HTTPInvokemethodMetadata
+                    $ref: '#/node-output/HTTP Invoke method/response'
+                  - variable: JSONParserParse
+                    $ref: '#/node-output/JSON Parser Parse/response/payload'
+                  - variable: IBMCloudantRetrievedocuments
+                    $ref: >-
+                      #/node-output/IBM Cloudant Retrieve
+                      documents/response/payload
+                  - variable: IBMCloudantRetrievedocumentsMetadata
+                    $ref: '#/node-output/IBM Cloudant Retrieve documents/response'
+              sample-data: |-
+                {
+                    "lines": [
+                        {
+                            "lineId": "1",
+                            "shipNodeAvailability": [
+                                {
+                                    "totalAvailableQuantity": 45,
+                                    "onhandAvailableQuantity": 45,
+                                    "onhandEarliestShipTs": "2019-07-03T07:31:57.942Z",
+                                    "onhandLatestShipTs": "2019-07-03T07:31:57.942Z",
+                                    "futureAvailableQuantity": 0,
+                                    "futureEarliestShipTs": "2500-01-01T00:00:00.000Z",
+                                    "futureLatestShipTs": "2500-01-01T00:00:00.000Z",
+                                    "earliestShipTs": "2019-07-03T07:31:57.942Z",
+                                    "thresholdLevel": "2",
+                                    "thresholdType": "ONHAND",
+                                    "shipNode": "ADSTORE1",
+                                    "latestShipTs": "2019-07-03T07:31:57.942Z"
+                                }
+                            ]
+                        }
+                    ]
+                }
+              output-schema:
+                $schema: 'http://json-schema.org/draft-04/schema#'
+                type: object
+                properties:
+                  lines:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        lineId:
+                          type: string
+                        shipNodeAvailability:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              totalAvailableQuantity:
+                                type: number
+                              onhandAvailableQuantity:
+                                type: number
+                              onhandEarliestShipTs:
+                                type: string
+                              onhandLatestShipTs:
+                                type: string
+                              futureAvailableQuantity:
+                                type: number
+                              futureEarliestShipTs:
+                                type: string
+                              futureLatestShipTs:
+                                type: string
+                              earliestShipTs:
+                                type: string
+                              thresholdLevel:
+                                type: string
+                              thresholdType:
+                                type: string
+                              shipNode:
+                                type: string
+                              latestShipTs:
+                                type: string
+                title: Parsed JSON
+          - logging:
+              name: Log 6
+              map:
+                $map: 'http://ibm.com/appconnect/map/v1'
+                input:
+                  - variable: Foreachitem
+                    $ref: '#/block/For each/current-item'
+                  - variable: Trigger
+                    $ref: '#/trigger/payload'
+                  - variable: JSONParserParse3
+                    $ref: >-
+                      #/block/For each/node-output/JSON Parser Parse
+                      3/response/payload
+                  - variable: HTTPInvokemethod2
+                    $ref: >-
+                      #/block/For each/node-output/HTTP Invoke method
+                      2/response/payload
+                  - variable: HTTPInvokemethod2Metadata
+                    $ref: '#/block/For each/node-output/HTTP Invoke method 2/response'
+                  - variable: JSONParserParse2
+                    $ref: >-
+                      #/block/For each/node-output/JSON Parser Parse
+                      2/response/payload
+                  - variable: HTTPInvokemethod
+                    $ref: '#/node-output/HTTP Invoke method/response/payload'
+                  - variable: HTTPInvokemethodMetadata
+                    $ref: '#/node-output/HTTP Invoke method/response'
+                  - variable: JSONParserParse
+                    $ref: '#/node-output/JSON Parser Parse/response/payload'
+                  - variable: IBMCloudantRetrievedocuments
+                    $ref: >-
+                      #/node-output/IBM Cloudant Retrieve
+                      documents/response/payload
+                  - variable: IBMCloudantRetrievedocumentsMetadata
+                    $ref: '#/node-output/IBM Cloudant Retrieve documents/response'
+                mappings:
+                  - logLevel:
+                      template: Info
+                  - logMessage:
+                      template: '{{$JSONParserParse2}}'
+          - custom-action:
+              name: HTTP Invoke method 3
+              target:
+                $ref: '#/integration/action-interfaces/action-interface-4'
+              action: INVOKE
+              map:
+                customSchemas:
+                  properties.`requestHeaders`:
+                    type: object
+                    properties:
+                      X-IBM-Client-Secret:
+                        type: string
+                      X-IBM-User-Secret:
+                        type: string
+                      X-IBM-Client-Id:
+                        type: string
+                      Content-Type:
+                        type: string
+                mappings:
+                  - continue2xx:
+                      expression: 'true'
+                  - method:
+                      template: POST
+                  - requestBody:
+                      template: |-
+                        {
+                          "_id" : "{{$JSONParserParse2.lines.shipNodeAvailability.shipNode}}"
+                         
+                        }
+                  - requestHeaders:
+                      mappings:
+                        - Content-Type:
+                            template: application/json
+                        - X-IBM-Client-Id:
+                            template: a307f3bb-2a4d-4fcd-acd1-ee294a576958
+                        - X-IBM-Client-Secret:
+                            template: kN2tU3aU5jS4dA7eQ5kX8uS1wA4hE4fB4rE8iK5wI8lL1qD0fQ
+                        - X-IBM-User-Secret:
+                            template: 1e6a681b-dd06-449c-8eed-dc6f21b7b889
+                  - url:
+                      template: 'https://api.ibm.com/scinsights/run/api/locations'
+                $map: 'http://ibm.com/appconnect/map/v1'
+                input:
+                  - variable: Foreachitem
+                    $ref: '#/block/For each/current-item'
+                  - variable: Trigger
+                    $ref: '#/trigger/payload'
+                  - variable: JSONParserParse3
+                    $ref: >-
+                      #/block/For each/node-output/JSON Parser Parse
+                      3/response/payload
+                  - variable: HTTPInvokemethod2
+                    $ref: >-
+                      #/block/For each/node-output/HTTP Invoke method
+                      2/response/payload
+                  - variable: HTTPInvokemethod2Metadata
+                    $ref: '#/block/For each/node-output/HTTP Invoke method 2/response'
+                  - variable: JSONParserParse2
+                    $ref: >-
+                      #/block/For each/node-output/JSON Parser Parse
+                      2/response/payload
+                  - variable: HTTPInvokemethod
+                    $ref: '#/node-output/HTTP Invoke method/response/payload'
+                  - variable: HTTPInvokemethodMetadata
+                    $ref: '#/node-output/HTTP Invoke method/response'
+                  - variable: JSONParserParse
+                    $ref: '#/node-output/JSON Parser Parse/response/payload'
+                  - variable: IBMCloudantRetrievedocuments
+                    $ref: >-
+                      #/node-output/IBM Cloudant Retrieve
+                      documents/response/payload
+                  - variable: IBMCloudantRetrievedocumentsMetadata
+                    $ref: '#/node-output/IBM Cloudant Retrieve documents/response'
+          - logging:
+              name: Log 2
+              map:
+                $map: 'http://ibm.com/appconnect/map/v1'
+                input:
+                  - variable: Foreachitem
+                    $ref: '#/block/For each/current-item'
+                  - variable: Trigger
+                    $ref: '#/trigger/payload'
+                  - variable: JSONParserParse3
+                    $ref: >-
+                      #/block/For each/node-output/JSON Parser Parse
+                      3/response/payload
+                  - variable: HTTPInvokemethod2
+                    $ref: >-
+                      #/block/For each/node-output/HTTP Invoke method
+                      2/response/payload
+                  - variable: HTTPInvokemethod2Metadata
+                    $ref: '#/block/For each/node-output/HTTP Invoke method 2/response'
+                  - variable: JSONParserParse2
+                    $ref: >-
+                      #/block/For each/node-output/JSON Parser Parse
+                      2/response/payload
+                  - variable: HTTPInvokemethod3
+                    $ref: >-
+                      #/block/For each/node-output/HTTP Invoke method
+                      3/response/payload
+                  - variable: HTTPInvokemethod3Metadata
+                    $ref: '#/block/For each/node-output/HTTP Invoke method 3/response'
+                  - variable: HTTPInvokemethod
+                    $ref: '#/node-output/HTTP Invoke method/response/payload'
+                  - variable: HTTPInvokemethodMetadata
+                    $ref: '#/node-output/HTTP Invoke method/response'
+                  - variable: JSONParserParse
+                    $ref: '#/node-output/JSON Parser Parse/response/payload'
+                  - variable: IBMCloudantRetrievedocuments
+                    $ref: >-
+                      #/node-output/IBM Cloudant Retrieve
+                      documents/response/payload
+                  - variable: IBMCloudantRetrievedocumentsMetadata
+                    $ref: '#/node-output/IBM Cloudant Retrieve documents/response'
+                mappings:
+                  - logLevel:
+                      template: Info
+                  - logMessage:
+                      template: |-
+                        {
+                          "_id" : "{{$JSONParserParse2.lines.shipNodeAvailability.shipNode}}"
+                         
+                        }
+          - logging:
+              name: Log 7
+              map:
+                $map: 'http://ibm.com/appconnect/map/v1'
+                input:
+                  - variable: Foreachitem
+                    $ref: '#/block/For each/current-item'
+                  - variable: Trigger
+                    $ref: '#/trigger/payload'
+                  - variable: JSONParserParse3
+                    $ref: >-
+                      #/block/For each/node-output/JSON Parser Parse
+                      3/response/payload
+                  - variable: HTTPInvokemethod2
+                    $ref: >-
+                      #/block/For each/node-output/HTTP Invoke method
+                      2/response/payload
+                  - variable: HTTPInvokemethod2Metadata
+                    $ref: '#/block/For each/node-output/HTTP Invoke method 2/response'
+                  - variable: JSONParserParse2
+                    $ref: >-
+                      #/block/For each/node-output/JSON Parser Parse
+                      2/response/payload
+                  - variable: HTTPInvokemethod3
+                    $ref: >-
+                      #/block/For each/node-output/HTTP Invoke method
+                      3/response/payload
+                  - variable: HTTPInvokemethod3Metadata
+                    $ref: '#/block/For each/node-output/HTTP Invoke method 3/response'
+                  - variable: HTTPInvokemethod
+                    $ref: '#/node-output/HTTP Invoke method/response/payload'
+                  - variable: HTTPInvokemethodMetadata
+                    $ref: '#/node-output/HTTP Invoke method/response'
+                  - variable: JSONParserParse
+                    $ref: '#/node-output/JSON Parser Parse/response/payload'
+                  - variable: IBMCloudantRetrievedocuments
+                    $ref: >-
+                      #/node-output/IBM Cloudant Retrieve
+                      documents/response/payload
+                  - variable: IBMCloudantRetrievedocumentsMetadata
+                    $ref: '#/node-output/IBM Cloudant Retrieve documents/response'
+                mappings:
+                  - logLevel:
+                      template: Info
+                  - logMessage:
+                      template: '{{$HTTPInvokemethod3Metadata."status-code"}}'
+          - custom-action:
+              name: HTTP Invoke method 4
+              target:
+                $ref: '#/integration/action-interfaces/action-interface-5'
+              action: INVOKE
+              map:
+                customSchemas:
+                  properties.`requestHeaders`:
+                    type: object
+                    properties:
+                      X-IBM-Client-Secret:
+                        type: string
+                      X-IBM-User-Secret:
+                        type: string
+                      X-IBM-Client-Id:
+                        type: string
+                      Content-Type:
+                        type: string
+                mappings:
+                  - continue2xx:
+                      expression: 'true'
+                  - method:
+                      template: PUT
+                  - requestBody:
+                      template: "{\n  \"_id\": \"{{$JSONParserParse3.Itemid}}\",\n     \"quantity\": {{$JSONParserParse2.lines.shipNodeAvailability.onhandAvailableQuantity}},  \"location\": \"{{$JSONParserParse2.lines.shipNodeAvailability.shipNode}}\",\n\t \"storageDate\": \"{{$JSONParserParse2.lines.shipNodeAvailability.futureEarliestShipTs}}\",\n\n  \n  \"line\": \"{{$JSONParserParse2.lines.lineId}}\",\n  \"safetyStockLevel\": {{$JSONParserParse2.lines.shipNodeAvailability.thresholdLevel}}\n}"
+                  - requestHeaders:
+                      mappings:
+                        - Content-Type:
+                            template: application/json
+                        - X-IBM-Client-Id:
+                            template: a307f3bb-2a4d-4fcd-acd1-ee294a576958
+                        - X-IBM-Client-Secret:
+                            template: kN2tU3aU5jS4dA7eQ5kX8uS1wA4hE4fB4rE8iK5wI8lL1qD0fQ
+                        - X-IBM-User-Secret:
+                            template: 1e6a681b-dd06-449c-8eed-dc6f21b7b889
+                  - url:
+                      template: >-
+                        https://api.ibm.com/scinsights/run/api/productinventories/{{$JSONParserParse3.Itemid}}
+                $map: 'http://ibm.com/appconnect/map/v1'
+                input:
+                  - variable: Foreachitem
+                    $ref: '#/block/For each/current-item'
+                  - variable: Trigger
+                    $ref: '#/trigger/payload'
+                  - variable: JSONParserParse3
+                    $ref: >-
+                      #/block/For each/node-output/JSON Parser Parse
+                      3/response/payload
+                  - variable: HTTPInvokemethod2
+                    $ref: >-
+                      #/block/For each/node-output/HTTP Invoke method
+                      2/response/payload
+                  - variable: HTTPInvokemethod2Metadata
+                    $ref: '#/block/For each/node-output/HTTP Invoke method 2/response'
+                  - variable: JSONParserParse2
+                    $ref: >-
+                      #/block/For each/node-output/JSON Parser Parse
+                      2/response/payload
+                  - variable: HTTPInvokemethod3
+                    $ref: >-
+                      #/block/For each/node-output/HTTP Invoke method
+                      3/response/payload
+                  - variable: HTTPInvokemethod3Metadata
+                    $ref: '#/block/For each/node-output/HTTP Invoke method 3/response'
+                  - variable: HTTPInvokemethod
+                    $ref: '#/node-output/HTTP Invoke method/response/payload'
+                  - variable: HTTPInvokemethodMetadata
+                    $ref: '#/node-output/HTTP Invoke method/response'
+                  - variable: JSONParserParse
+                    $ref: '#/node-output/JSON Parser Parse/response/payload'
+                  - variable: IBMCloudantRetrievedocuments
+                    $ref: >-
+                      #/node-output/IBM Cloudant Retrieve
+                      documents/response/payload
+                  - variable: IBMCloudantRetrievedocumentsMetadata
+                    $ref: '#/node-output/IBM Cloudant Retrieve documents/response'
+          - logging:
+              name: Log 3
+              map:
+                $map: 'http://ibm.com/appconnect/map/v1'
+                input:
+                  - variable: Foreachitem
+                    $ref: '#/block/For each/current-item'
+                  - variable: Trigger
+                    $ref: '#/trigger/payload'
+                  - variable: JSONParserParse3
+                    $ref: >-
+                      #/block/For each/node-output/JSON Parser Parse
+                      3/response/payload
+                  - variable: HTTPInvokemethod2
+                    $ref: >-
+                      #/block/For each/node-output/HTTP Invoke method
+                      2/response/payload
+                  - variable: HTTPInvokemethod2Metadata
+                    $ref: '#/block/For each/node-output/HTTP Invoke method 2/response'
+                  - variable: JSONParserParse2
+                    $ref: >-
+                      #/block/For each/node-output/JSON Parser Parse
+                      2/response/payload
+                  - variable: HTTPInvokemethod3
+                    $ref: >-
+                      #/block/For each/node-output/HTTP Invoke method
+                      3/response/payload
+                  - variable: HTTPInvokemethod3Metadata
+                    $ref: '#/block/For each/node-output/HTTP Invoke method 3/response'
+                  - variable: HTTPInvokemethod4
+                    $ref: >-
+                      #/block/For each/node-output/HTTP Invoke method
+                      4/response/payload
+                  - variable: HTTPInvokemethod4Metadata
+                    $ref: '#/block/For each/node-output/HTTP Invoke method 4/response'
+                  - variable: HTTPInvokemethod
+                    $ref: '#/node-output/HTTP Invoke method/response/payload'
+                  - variable: HTTPInvokemethodMetadata
+                    $ref: '#/node-output/HTTP Invoke method/response'
+                  - variable: JSONParserParse
+                    $ref: '#/node-output/JSON Parser Parse/response/payload'
+                  - variable: IBMCloudantRetrievedocuments
+                    $ref: >-
+                      #/node-output/IBM Cloudant Retrieve
+                      documents/response/payload
+                  - variable: IBMCloudantRetrievedocumentsMetadata
+                    $ref: '#/node-output/IBM Cloudant Retrieve documents/response'
+                mappings:
+                  - logLevel:
+                      template: Info
+                  - logMessage:
+                      template: "https://api.ibm.com/scinsights/run/api/productinventories/{{$JSONParserParse3.Itemid}}\n\n{\n  \"_id\": \"{{$JSONParserParse3.Itemid}}\",\n     \"quantity\": {{$JSONParserParse2.lines.shipNodeAvailability.onhandAvailableQuantity}},  \"location\": \"{{$JSONParserParse2.lines.shipNodeAvailability.shipNode}}\",\n\t \"storageDate\": \"{{$JSONParserParse2.lines.shipNodeAvailability.futureEarliestShipTs}}\",\n\n  \n  \"line\": \"{{$JSONParserParse2.lines.lineId}}\",\n  \"safetyStockLevel\": {{$JSONParserParse2.lines.shipNodeAvailability.thresholdLevel}}\n}"
+          - logging:
+              name: Log 8
+              map:
+                $map: 'http://ibm.com/appconnect/map/v1'
+                input:
+                  - variable: Foreachitem
+                    $ref: '#/block/For each/current-item'
+                  - variable: Trigger
+                    $ref: '#/trigger/payload'
+                  - variable: JSONParserParse3
+                    $ref: >-
+                      #/block/For each/node-output/JSON Parser Parse
+                      3/response/payload
+                  - variable: HTTPInvokemethod2
+                    $ref: >-
+                      #/block/For each/node-output/HTTP Invoke method
+                      2/response/payload
+                  - variable: HTTPInvokemethod2Metadata
+                    $ref: '#/block/For each/node-output/HTTP Invoke method 2/response'
+                  - variable: JSONParserParse2
+                    $ref: >-
+                      #/block/For each/node-output/JSON Parser Parse
+                      2/response/payload
+                  - variable: HTTPInvokemethod3
+                    $ref: >-
+                      #/block/For each/node-output/HTTP Invoke method
+                      3/response/payload
+                  - variable: HTTPInvokemethod3Metadata
+                    $ref: '#/block/For each/node-output/HTTP Invoke method 3/response'
+                  - variable: HTTPInvokemethod4
+                    $ref: >-
+                      #/block/For each/node-output/HTTP Invoke method
+                      4/response/payload
+                  - variable: HTTPInvokemethod4Metadata
+                    $ref: '#/block/For each/node-output/HTTP Invoke method 4/response'
+                  - variable: HTTPInvokemethod
+                    $ref: '#/node-output/HTTP Invoke method/response/payload'
+                  - variable: HTTPInvokemethodMetadata
+                    $ref: '#/node-output/HTTP Invoke method/response'
+                  - variable: JSONParserParse
+                    $ref: '#/node-output/JSON Parser Parse/response/payload'
+                  - variable: IBMCloudantRetrievedocuments
+                    $ref: >-
+                      #/node-output/IBM Cloudant Retrieve
+                      documents/response/payload
+                  - variable: IBMCloudantRetrievedocumentsMetadata
+                    $ref: '#/node-output/IBM Cloudant Retrieve documents/response'
+                mappings:
+                  - logLevel:
+                      template: Info
+                  - logMessage:
+                      template: '{{$HTTPInvokemethod4Metadata."status-code"}}'
+  name: IV2SCIEDF
+models: {}
